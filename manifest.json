@@ -1,0 +1,34 @@
+{
+  "name": "GRAPHITE Drawing Command System",
+  "short_name": "GRAPHITE",
+  "description": "Track your pencil and graphite artwork — gallery, practice sessions, progress analytics, and supply inventory.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#06090E",
+  "theme_color": "#00D4FF",
+  "categories": ["productivity", "art", "utilities"],
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "banner.png",
+      "sizes": "1280x640",
+      "type": "image/png",
+      "label": "GRAPHITE Drawing Command System"
+    }
+  ]
+}
