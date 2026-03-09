@@ -1,0 +1,1363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>GRAPHITE // Drawing Command System</title>
+  <link rel="manifest" href="manifest.json"/>
+  <meta name="theme-color" content="#00D4FF"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <link rel="apple-touch-icon" href="icon-192.png"/>
+  <link rel="icon" type="image/png" href="icon-192.png"/>
+  <!-- Fonts are the only external dependency; app works without them if offline -->
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&family=Exo+2:ital,wght@0,300;0,400;0,600;1,300&display=swap" rel="stylesheet"/>
+
+  <style>
+    /* ── CSS variables: the entire colour palette lives here ── */
+    :root {
+      --void:        #06090E;
+      --hull:        #0B1018;
+      --panel:       #0F1823;
+      --border:      #1C3050;
+      --cyan:        #00D4FF;
+      --cyan-glow:   rgba(0,212,255,0.18);
+      --cyan-faint:  rgba(0,212,255,0.07);
+      --amber:       #FF9500;
+      --green:       #00FF88;
+      --red:         #FF3860;
+      --text:        #A8C8E0;
+      --text-hi:     #D4EAF7;
+      --text-dim:    #3A5870;
+      --text-mono:   #5A8AAA;
+      --f-display:  'Orbitron', monospace;
+      --f-mono:     'Share Tech Mono', monospace;
+      --f-body:     'Exo 2', sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { min-height: 100%; background: var(--void); color: var(--text); font-family: var(--f-body); overflow-x: hidden; }
+
+    /* Dot-grid background texture */
+    body::before {
+      content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      background-image: radial-gradient(circle, rgba(30,50,80,0.35) 1px, transparent 1px);
+      background-size: 28px 28px;
+    }
+
+    /* Subtle CRT scan lines across the whole screen */
+    body::after {
+      content: ''; position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+      background: repeating-linear-gradient(
+        to bottom, transparent 0px, transparent 3px,
+        rgba(0,0,0,0.06) 3px, rgba(0,0,0,0.06) 4px
+      );
+    }
+
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: var(--hull); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* ── Animations ── */
+    @keyframes fadeUp  { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+    @keyframes fadeIn  { from { opacity:0; } to { opacity:1; } }
+    @keyframes pulse   { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+    @keyframes bootBar { from { transform:translateX(-100%); } to { transform:translateX(0); } }
+    @keyframes bootFade { 0% { opacity:0; } 15% { opacity:1; } 80% { opacity:1; } 100% { opacity:0; pointer-events:none; } }
+
+    .fade-up { animation: fadeUp 0.3s ease forwards; }
+
+    /* ── Boot screen overlay ── */
+    #boot {
+      position: fixed; inset: 0; z-index: 500;
+      background: var(--void);
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px;
+      animation: bootFade 1.8s ease forwards;
+      pointer-events: none;
+    }
+    #boot h1 {
+      font-family: var(--f-display); font-size: clamp(28px, 8vw, 48px); font-weight: 900;
+      color: var(--cyan); letter-spacing: 0.14em;
+      text-shadow: 0 0 30px rgba(0,212,255,0.7);
+    }
+    #boot-bar { width: 260px; height: 2px; background: var(--border); overflow: hidden; }
+    #boot-bar span {
+      display: block; height: 100%; width: 100%;
+      background: var(--cyan); box-shadow: 0 0 12px var(--cyan);
+      animation: bootBar 1.4s cubic-bezier(0.16,1,0.3,1) forwards;
+    }
+    #boot p { font-family: var(--f-mono); font-size: 11px; color: var(--text-dim); letter-spacing: 0.12em; }
+
+    /* ── App shell ── */
+    #app { position: relative; z-index: 1; min-height: 100vh; }
+
+    /* ── Command bar (sticky header) ── */
+    #cmd-bar {
+      background: var(--hull); border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; z-index: 50;
+    }
+    #status-strip {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 20px; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 8px;
+    }
+    #status-left { display: flex; align-items: center; gap: 14px; }
+    .logo {
+      font-family: var(--f-display); font-size: 16px; font-weight: 900;
+      color: var(--cyan); letter-spacing: 0.18em;
+      text-shadow: 0 0 16px rgba(0,212,255,0.5);
+    }
+    .sep { font-family: var(--f-mono); font-size: 10px; color: var(--text-dim); }
+    .sys-status { font-family: var(--f-mono); font-size: 10px; color: var(--text-dim); letter-spacing: 0.08em; display: flex; align-items: center; gap: 5px; }
+    #status-right { font-family: var(--f-mono); font-size: 10px; color: var(--text-dim); letter-spacing: 0.06em; display: flex; gap: 16px; flex-wrap: wrap; }
+    #status-right span b { color: var(--cyan); font-weight: 400; }
+    #status-right span.hrs b { color: var(--amber); }
+
+    /* Blinking status pip */
+    .pip { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
+    .pip-green { background: var(--green); box-shadow: 0 0 5px var(--green); animation: pulse 2.4s infinite; }
+    .pip-amber { background: var(--amber); box-shadow: 0 0 5px var(--amber); }
+    .pip-red   { background: var(--red);   box-shadow: 0 0 5px var(--red); }
+
+    /* Tab bar */
+    #tabs { display: flex; padding-left: 8px; overflow-x: auto; }
+    #tabs button {
+      background: transparent; border: none; cursor: pointer;
+      padding: 11px 18px; white-space: nowrap;
+      font-family: var(--f-mono); font-size: 11px; font-weight: 700;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      color: var(--text-dim);
+      border-top: 2px solid transparent;
+      transition: color 0.2s, border-color 0.2s, box-shadow 0.2s;
+    }
+    #tabs button.active {
+      color: var(--cyan); border-top-color: var(--cyan);
+      box-shadow: 0 -2px 10px rgba(0,212,255,0.2) inset;
+      text-shadow: 0 0 10px rgba(0,212,255,0.5);
+    }
+
+    /* ── Page content ── */
+    #content { max-width: 1040px; margin: 0 auto; padding: 32px 18px 72px; }
+
+    /* ── Section header ── */
+    .sec-head {
+      font-family: var(--f-mono); font-size: 13px; font-weight: 700;
+      letter-spacing: 0.18em; color: var(--cyan); margin-bottom: 6px;
+    }
+    .sec-head::before { content: '[ '; }
+    .sec-head::after  { content: ' ]'; }
+    .sec-sub { font-family: var(--f-mono); font-size: 11px; color: var(--text-dim); margin-bottom: 24px; }
+
+    /* ── Gallery grid ── */
+    .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+    .g-card { background: var(--hull); border: 1px solid var(--border); cursor: pointer; overflow: hidden; position: relative; transition: border-color 0.25s, box-shadow 0.25s; }
+    .g-card:hover { border-color: rgba(0,212,255,0.4); box-shadow: 0 0 20px rgba(0,212,255,0.08); }
+    .g-card::before { content:''; position:absolute; top:-1px; left:-1px;  width:14px; height:14px; border:2px solid var(--cyan); border-right:none; border-bottom:none; z-index:2; }
+    .g-card::after  { content:''; position:absolute; top:-1px; right:-1px; width:14px; height:14px; border:2px solid var(--cyan); border-left:none;  border-bottom:none; z-index:2; }
+    .g-card-bl { position:absolute; bottom:-1px; left:-1px;  width:14px; height:14px; border:2px solid var(--cyan); border-right:none; border-top:none; z-index:2; pointer-events:none; }
+    .g-card-br { position:absolute; bottom:-1px; right:-1px; width:14px; height:14px; border:2px solid var(--cyan); border-left:none;  border-top:none; z-index:2; pointer-events:none; }
+    .g-card img { width:100%; height:196px; object-fit:cover; display:block; filter:grayscale(20%) contrast(1.05); transition:filter 0.3s; }
+    .g-card:hover img { filter:grayscale(0%) contrast(1.1) brightness(1.05); }
+    .g-card-no-img { height:196px; display:flex; align-items:center; justify-content:center; background:var(--panel); font-family:var(--f-mono); font-size:11px; color:var(--text-dim); letter-spacing:0.1em; }
+    .g-card-body { padding: 12px 14px; }
+    .g-card-title { font-family:var(--f-display); font-size:13px; font-weight:700; letter-spacing:0.08em; color:var(--text-hi); margin-bottom:6px; }
+    .g-card-meta  { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+    .g-card-date  { font-family:var(--f-mono); font-size:10px; color:var(--text-dim); }
+    .grade-pills  { display:flex; flex-wrap:wrap; gap:4px; }
+    .grade-pill   { font-family:var(--f-mono); font-size:10px; padding:2px 7px; border:1px solid var(--border); color:var(--text-mono); }
+
+    /* ── Session rows ── */
+    .sess-row { background:var(--hull); border:1px solid var(--border); border-left:2px solid var(--cyan); padding:16px 20px; margin-bottom:10px; transition:border-color 0.2s; }
+    .sess-row:hover { border-color:rgba(0,212,255,0.3); border-left-color:var(--cyan); }
+    .sess-top { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+    .sess-meta { display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+    .sess-date  { font-family:var(--f-mono); font-size:12px; color:var(--cyan); letter-spacing:0.06em; }
+    .sess-time  { font-family:var(--f-mono); font-size:11px; color:var(--amber); }
+    .sess-mood  { font-family:var(--f-mono); font-size:11px; color:var(--text-dim); }
+    .sess-notes { font-size:13px; color:var(--text); font-style:italic; line-height:1.6; margin-top:8px; }
+
+    /* ── Pill groups ── */
+    .pills { display:flex; flex-wrap:wrap; gap:6px; }
+    .pill { padding:4px 12px; font-family:var(--f-mono); font-size:11px; letter-spacing:0.05em; cursor:pointer; user-select:none; border:1px solid var(--border); color:var(--text-dim); transition:all 0.15s; }
+    .pill:hover { border-color:var(--cyan); color:var(--cyan); }
+    .pill.on { background:rgba(0,212,255,0.12); border-color:var(--cyan); color:var(--cyan); text-shadow:0 0 8px var(--cyan); }
+
+    /* ── Stat blocks (progress tab) ── */
+    .stat-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin-bottom:28px; }
+    .stat-block { background:var(--hull); border:1px solid var(--border); padding:20px; text-align:center; position:relative; }
+    .stat-block::before { content:''; position:absolute; top:-1px; left:-1px; width:12px; height:12px; border-color:var(--cyan); border-style:solid; border-width:2px 0 0 2px; }
+    .stat-num   { font-family:var(--f-display); font-size:38px; font-weight:700; color:var(--cyan); display:block; text-shadow:0 0 20px rgba(0,212,255,0.4); }
+    .stat-label { font-family:var(--f-mono); font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:var(--text-dim); display:block; margin-top:4px; }
+
+    /* ── Progress bars ── */
+    .prog-track { height:4px; background:var(--border); overflow:hidden; }
+    .prog-fill  { height:100%; background:var(--cyan); box-shadow:0 0 8px var(--cyan); }
+
+    /* ── Chart panels ── */
+    .chart-panel { background:var(--hull); border:1px solid var(--border); padding:20px; margin-bottom:18px; }
+    .chart-label { font-family:var(--f-mono); font-size:10px; color:var(--text-dim); letter-spacing:0.1em; margin-bottom:14px; }
+    svg.chart { width:100%; display:block; overflow:visible; }
+
+    /* ── Supply cards ── */
+    .sup-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:10px; }
+    .sup-card { background:var(--hull); border:1px solid var(--border); padding:14px 16px; transition:border-color 0.2s; position:relative; }
+    .sup-card:hover { border-color:rgba(0,212,255,0.3); }
+    .sup-grade { font-family:var(--f-display); font-size:26px; font-weight:700; color:var(--cyan); text-shadow:0 0 14px rgba(0,212,255,0.4); letter-spacing:0.04em; }
+    .sup-name  { font-family:var(--f-display); font-size:14px; font-weight:700; color:var(--text-hi); letter-spacing:0.06em; }
+    .sup-brand { font-family:var(--f-mono); font-size:11px; color:var(--text-dim); margin-top:2px; }
+    .sup-gsm   { font-family:var(--f-mono); font-size:10px; color:var(--amber); margin-top:3px; }
+    .sup-note  { font-family:var(--f-mono); font-size:10px; color:var(--text-dim); margin-top:4px; font-style:italic; }
+    .sup-status { font-family:var(--f-mono); font-size:10px; display:flex; align-items:center; gap:4px; }
+
+    /* ── Buttons ── */
+    .btn { display:inline-flex; align-items:center; gap:8px; padding:9px 22px; cursor:pointer; font-family:var(--f-mono); font-size:11px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; border:1px solid; transition:all 0.2s; background:transparent; }
+    .btn-primary { color:var(--cyan); border-color:var(--cyan); }
+    .btn-primary:hover { background:rgba(0,212,255,0.15); box-shadow:0 0 16px var(--cyan-glow); }
+    .btn-ghost   { color:var(--text-dim); border-color:var(--border); }
+    .btn-ghost:hover { color:var(--text); border-color:var(--text-dim); }
+    .btn-danger  { color:var(--red); border-color:rgba(255,56,96,0.4); }
+    .btn-danger:hover { background:rgba(255,56,96,0.1); }
+    .btn-sm { padding:6px 14px; font-size:10px; }
+    .btn-icon { padding:5px 10px; font-size:14px; }
+
+    /* ── Header row (section title + action button) ── */
+    .hdr { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:24px; gap:12px; flex-wrap:wrap; }
+
+    /* ── Form elements ── */
+    .form-group { display:flex; flex-direction:column; gap:6px; }
+    .form-row   { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    @media(max-width:480px) { .form-row { grid-template-columns:1fr; } }
+    label { font-family:var(--f-mono); font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-dim); }
+    label::before { content:'// '; color:var(--cyan); opacity:0.5; }
+    input, textarea, select {
+      width:100%; padding:9px 12px;
+      background:var(--panel); color:var(--text-hi);
+      border:1px solid var(--border); border-bottom-color:var(--text-dim);
+      font-family:var(--f-mono); font-size:13px;
+      outline:none; border-radius:0; appearance:none; -webkit-appearance:none;
+      transition:border-color 0.2s, box-shadow 0.2s;
+    }
+    input:focus, textarea:focus, select:focus {
+      border-color:var(--cyan); box-shadow:0 2px 0 var(--cyan), 0 0 14px var(--cyan-faint);
+    }
+    textarea { resize:vertical; min-height:72px; line-height:1.6; }
+    select {
+      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%235A8AAA'/%3E%3C/svg%3E");
+      background-repeat:no-repeat; background-position:right 10px center; padding-right:28px;
+    }
+
+    /* ── Star rating ── */
+    .stars { display:flex; gap:4px; }
+    .star  { font-size:22px; cursor:pointer; transition:transform 0.1s, text-shadow 0.1s; color:var(--border); line-height:1; }
+    .star:hover, .star.on { color:var(--cyan); text-shadow:0 0 8px var(--cyan); }
+    .stars.sm .star { font-size:14px; cursor:default; }
+
+    /* ── Upload zone ── */
+    .upload-zone { border:1px dashed var(--border); padding:20px; text-align:center; cursor:pointer; font-family:var(--f-mono); font-size:11px; color:var(--text-dim); letter-spacing:0.08em; transition:border-color 0.2s, color 0.2s; }
+    .upload-zone:hover { border-color:var(--cyan); color:var(--cyan); }
+    .upload-preview { width:100%; max-height:180px; object-fit:cover; margin-top:8px; display:block; }
+
+    /* ── Modal / overlay ── */
+    .overlay { position:fixed; inset:0; z-index:100; background:rgba(6,9,14,0.88); display:flex; align-items:center; justify-content:center; padding:16px; animation:fadeIn 0.2s ease; backdrop-filter:blur(4px); }
+    .modal   { position:relative; background:var(--hull); border:1px solid var(--border); width:100%; max-width:580px; max-height:90vh; overflow-y:auto; animation:fadeUp 0.25s ease; box-shadow:0 0 60px rgba(0,212,255,0.1); }
+    .modal::before { content:''; position:absolute; top:-1px; left:-1px;  width:18px; height:18px; border:2px solid var(--cyan); border-right:none; border-bottom:none; }
+    .modal::after  { content:''; position:absolute; top:-1px; right:-1px; width:18px; height:18px; border:2px solid var(--cyan); border-left:none;  border-bottom:none; }
+    .modal-hd { padding:24px 28px 0; display:flex; align-items:center; justify-content:space-between; }
+    .modal-hd-title { font-family:var(--f-mono); font-size:12px; color:var(--cyan); letter-spacing:0.12em; }
+    .modal-bd { padding:22px 28px 28px; display:flex; flex-direction:column; gap:18px; }
+    .modal-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:4px; }
+
+    /* ── Empty state ── */
+    .empty { text-align:center; padding:56px 20px; }
+    .empty-icon { font-size:40px; margin-bottom:12px; opacity:0.3; }
+    .empty p { font-family:var(--f-mono); font-size:12px; letter-spacing:0.08em; color:var(--text-dim); }
+
+    /* ── Add supply inline form ── */
+    .add-form { background:var(--hull); border:1px solid var(--border); padding:20px; margin-top:10px; display:flex; flex-direction:column; gap:12px; }
+    .add-form-actions { display:flex; gap:8px; }
+
+    /* ── Mood strip in view modal ── */
+    .mood-strip { background:var(--panel); padding:10px 14px; border-left:2px solid var(--cyan); font-family:var(--f-mono); font-size:12px; color:var(--text-mono); }
+
+    /* ── View-modal detail row ── */
+    .detail-row { display:flex; gap:24px; flex-wrap:wrap; }
+    .detail-item span:first-child { font-family:var(--f-mono); font-size:10px; color:var(--text-dim); display:block; margin-bottom:3px; }
+    .detail-item span:last-child  { font-family:var(--f-display); font-size:14px; color:var(--text-hi); }
+
+    /* ── 2-col chart row ── */
+    .chart-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:14px; }
+    .focus-bar-row { margin-bottom:12px; }
+    .focus-bar-top { display:flex; justify-content:space-between; font-family:var(--f-mono); font-size:11px; margin-bottom:5px; }
+    .mood-row  { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); font-family:var(--f-mono); font-size:11px; }
+    .mood-count { font-family:var(--f-display); font-size:16px; color:var(--amber); }
+  </style>
+</head>
+<body>
+
+<!-- Boot animation (CSS auto-removes after 1.8s via animation) -->
+<div id="boot">
+  <h1>GRAPHITE</h1>
+  <div id="boot-bar"><span></span></div>
+  <p>DRAWING COMMAND SYSTEM — INITIALIZING…</p>
+</div>
+
+<div id="app">
+  <!-- ── Command bar ── -->
+  <div id="cmd-bar">
+    <div id="status-strip">
+      <div id="status-left">
+        <span class="logo">GRAPHITE</span>
+        <span class="sep">//</span>
+        <span class="sys-status"><span class="pip pip-green"></span>SYS ONLINE</span>
+      </div>
+      <div id="status-right">
+        <span><b id="st-pieces">0</b> PIECES</span>
+        <span><b id="st-sessions">0</b> SESSIONS</span>
+        <span class="hrs"><b id="st-hours">0</b> HRS</span>
+      </div>
+    </div>
+    <div id="tabs">
+      <button data-tab="gallery"  class="active">GALLERY</button>
+      <button data-tab="sessions"            >MISSION LOG</button>
+      <button data-tab="progress"            >ANALYTICS</button>
+      <button data-tab="supplies"            >INVENTORY</button>
+    </div>
+  </div>
+
+  <!-- ── Tab content panels ── -->
+  <div id="content">
+    <div id="tab-gallery"  class="tab-panel"></div>
+    <div id="tab-sessions" class="tab-panel" style="display:none"></div>
+    <div id="tab-progress" class="tab-panel" style="display:none"></div>
+    <div id="tab-supplies" class="tab-panel" style="display:none"></div>
+  </div>
+
+  <!-- Shared modal mount point -->
+  <div id="modal-root"></div>
+</div>
+
+<script>
+/* ════════════════════════════════════════════════════════════════
+   GRAPHITE — pure vanilla JS, zero external dependencies
+   State lives in plain objects and is synced to localStorage.
+════════════════════════════════════════════════════════════════ */
+
+/* ── Data constants ─────────────────────────────────────────── */
+var GRADES = ["9H","8H","7H","6H","5H","4H","3H","2H","H","F","HB","B","2B","3B","4B","5B","6B","7B","8B","9B"];
+var PAPERS = ["Sketch","Bristol Smooth","Bristol Vellum","Cartridge","Toned Grey","Toned Tan","Watercolor","Newsprint","Multimedia","Other"];
+var MOODS  = ["Flow state \uD83C\uDF0A","Satisfying \u2728","Challenging \uD83E\uDDE9","Frustrated \uD83D\uDE24","Meditative \uD83E\uDDD8","Experimental \uD83D\uDD2C","Focused \uD83C\uDFAF","Playful \uD83C\uDFB2"];
+var FOCUS  = ["Portraiture","Still Life","Landscape","Figure Drawing","Animals","Architecture","Shading Techniques","Linework","Texture","Composition","Hands","Eyes","Free Exploration"];
+
+/* ── App state (loaded from localStorage on start) ──────────── */
+var state = {
+  artworks: safeJSON('gfx-artworks', []),
+  sessions: safeJSON('gfx-sessions', []),
+  supplies: safeJSON('gfx-supplies', {pencils:[], papers:[]})
+};
+
+function safeJSON(key, fallback) {
+  try { var v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+  catch(e) { return fallback; }
+}
+
+function save() {
+  localStorage.setItem('gfx-artworks', JSON.stringify(state.artworks));
+  localStorage.setItem('gfx-sessions', JSON.stringify(state.sessions));
+  localStorage.setItem('gfx-supplies', JSON.stringify(state.supplies));
+  updateStatusBar();
+}
+
+/* ── Tiny DOM helpers ───────────────────────────────────────── */
+function el(tag, cls, html) {
+  var e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (html !== undefined) e.innerHTML = html;
+  return e;
+}
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
+
+/* ── Image compression ──────────────────────────────────────── */
+function compressImage(file, cb) {
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var img = new Image();
+    img.onload = function() {
+      var maxPx = 900;
+      var scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+      var cv = document.createElement('canvas');
+      cv.width  = img.width  * scale;
+      cv.height = img.height * scale;
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      cb(cv.toDataURL('image/jpeg', 0.83));
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+/* ── Star rating widget ─────────────────────────────────────── */
+function makeStars(currentVal, readOnly, small, onChange) {
+  var wrap = el('div', 'stars' + (small ? ' sm' : ''));
+  var stars = [];
+  function refresh(hov) {
+    stars.forEach(function(s, i) {
+      s.classList.toggle('on', i < (hov !== undefined ? hov : currentVal));
+    });
+  }
+  for (var n = 1; n <= 5; n++) {
+    (function(n) {
+      var s = el('span', 'star' + (n <= currentVal ? ' on' : ''), '\u2605');
+      if (!readOnly) {
+        s.onmouseenter = function() { refresh(n); };
+        s.onmouseleave = function() { refresh(); };
+        s.onclick = function() { currentVal = n; refresh(); if (onChange) onChange(n); };
+      }
+      stars.push(s);
+      wrap.appendChild(s);
+    })(n);
+  }
+  return wrap;
+}
+
+/* ── Modal helper ───────────────────────────────────────────── */
+function openModal(contentEl, maxW) {
+  var overlay = el('div', 'overlay');
+  var modal   = el('div', 'modal');
+  if (maxW) modal.style.maxWidth = maxW;
+  modal.appendChild(contentEl);
+  overlay.appendChild(modal);
+  overlay.onclick = function(e) { if (e.target === overlay) closeModal(); };
+  document.getElementById('modal-root').appendChild(overlay);
+  document.body.style.overflow = 'hidden';
+}
+function closeModal() {
+  document.getElementById('modal-root').innerHTML = '';
+  document.body.style.overflow = '';
+}
+
+/* ── Pill group helper ──────────────────────────────────────── */
+function makePillGroup(items, initSel, multi) {
+  var sel = initSel ? initSel.slice() : [];
+  var wrap = el('div', 'pills');
+  items.forEach(function(item) {
+    var p = el('span', 'pill' + (sel.indexOf(item) >= 0 ? ' on' : ''), item);
+    p.onclick = function() {
+      if (multi) {
+        var idx = sel.indexOf(item);
+        if (idx >= 0) sel.splice(idx, 1); else sel.push(item);
+      } else {
+        sel = sel[0] === item ? [] : [item];
+        wrap.querySelectorAll('.pill').forEach(function(x) { x.classList.remove('on'); });
+      }
+      p.classList.toggle('on', sel.indexOf(item) >= 0);
+    };
+    wrap.appendChild(p);
+  });
+  return {
+    wrap: wrap,
+    get: function() { return multi ? sel : (sel[0] || ''); }
+  };
+}
+
+/* ── Status bar ─────────────────────────────────────────────── */
+function updateStatusBar() {
+  document.getElementById('st-pieces').textContent   = state.artworks.length;
+  document.getElementById('st-sessions').textContent = state.sessions.length;
+  var allItems = state.artworks.concat(state.sessions);
+  var totalMins = allItems.reduce(function(a, x) { return a + (x.ts || 0); }, 0);
+  document.getElementById('st-hours').textContent = (totalMins / 60).toFixed(1);
+}
+
+/* ════════════════════════════════════════════════════════════════
+   GALLERY TAB
+════════════════════════════════════════════════════════════════ */
+function renderGallery() {
+  var panel = document.getElementById('tab-gallery');
+  panel.innerHTML = '';
+
+  // Header
+  var hdr  = el('div', 'hdr');
+  var hdrL = el('div');
+  hdrL.appendChild(el('div', 'sec-head', 'GALLERY'));
+  hdrL.appendChild(el('div', 'sec-sub', state.artworks.length + ' SPECIMEN' + (state.artworks.length !== 1 ? 'S' : '') + ' ON RECORD'));
+  var addBtn = el('button', 'btn btn-primary', '+ NEW ENTRY');
+  addBtn.onclick = openAddArtworkModal;
+  hdr.appendChild(hdrL);
+  hdr.appendChild(addBtn);
+  panel.appendChild(hdr);
+
+  if (!state.artworks.length) {
+    var empty = el('div', 'empty');
+    empty.appendChild(el('div', 'empty-icon', '\uD83D\uDCC4'));
+    empty.appendChild(el('p', '', 'NO ENTRIES FOUND \u2014 AWAITING INPUT'));
+    panel.appendChild(empty);
+    return;
+  }
+
+  var grid   = el('div', 'gallery-grid fade-up');
+  var sorted = state.artworks.slice().sort(function(a,b) { return new Date(b.date) - new Date(a.date); });
+
+  sorted.forEach(function(art) {
+    var card = el('div', 'g-card');
+    // Bottom corner brackets need real DOM nodes (pseudo-elements can't be styled per-instance)
+    card.appendChild(el('div', 'g-card-bl'));
+    card.appendChild(el('div', 'g-card-br'));
+
+    if (art.image) {
+      var img = el('img');
+      img.src = art.image; img.alt = art.title; img.loading = 'lazy';
+      card.appendChild(img);
+    } else {
+      card.appendChild(el('div', 'g-card-no-img', '[ NO IMAGE CAPTURED ]'));
+    }
+
+    var body  = el('div', 'g-card-body');
+    var title = el('div', 'g-card-title', art.title);
+    var meta  = el('div', 'g-card-meta');
+    meta.appendChild(el('span', 'g-card-date', art.date));
+    meta.appendChild(makeStars(art.rating, true, true, null));
+    body.appendChild(title);
+    body.appendChild(meta);
+
+    if (art.grades && art.grades.length) {
+      var gpills = el('div', 'grade-pills');
+      art.grades.slice(0, 6).forEach(function(g) {
+        gpills.appendChild(el('span', 'grade-pill', g));
+      });
+      if (art.grades.length > 6) gpills.appendChild(el('span', '', '+' + (art.grades.length - 6)));
+      body.appendChild(gpills);
+    }
+
+    card.appendChild(body);
+    card.onclick = function() { openViewArtworkModal(art); };
+    grid.appendChild(card);
+  });
+
+  panel.appendChild(grid);
+}
+
+function openAddArtworkModal() {
+  var imageData = null;
+  var ratingVal = 0;
+
+  var frag = document.createDocumentFragment();
+  var wrap = el('div');
+
+  // Header
+  var hd = el('div', 'modal-hd');
+  hd.appendChild(el('span', 'modal-hd-title', '[ NEW ARTWORK ENTRY ]'));
+  var closeBtn = el('button', 'btn btn-ghost btn-sm', '\u2715 CLOSE');
+  closeBtn.onclick = closeModal;
+  hd.appendChild(closeBtn);
+
+  // Body
+  var bd = el('div', 'modal-bd');
+
+  // Image upload
+  var imgGroup = el('div', 'form-group');
+  imgGroup.appendChild(el('label', '', 'Photo Reference'));
+  var zone      = el('div', 'upload-zone', '\u2191 CLICK TO UPLOAD PHOTOGRAPH');
+  var fileInput = el('input');
+  fileInput.type = 'file'; fileInput.accept = 'image/*'; fileInput.style.display = 'none';
+  var previewImg = null;
+  fileInput.onchange = function() {
+    if (!fileInput.files[0]) return;
+    compressImage(fileInput.files[0], function(data) {
+      imageData = data;
+      zone.textContent = '\u2713 IMAGE LOADED \u2014 CLICK TO REPLACE';
+      if (!previewImg) { previewImg = el('img', 'upload-preview'); imgGroup.appendChild(previewImg); }
+      previewImg.src = data;
+    });
+  };
+  zone.onclick = function() { fileInput.click(); };
+  imgGroup.appendChild(fileInput);
+  imgGroup.appendChild(zone);
+  bd.appendChild(imgGroup);
+
+  // Title + Date
+  var row1 = el('div', 'form-row');
+  var tg = el('div', 'form-group'); tg.appendChild(el('label', '', 'Title'));
+  var titleInput = el('input'); titleInput.placeholder = 'Untitled'; tg.appendChild(titleInput);
+  var dg = el('div', 'form-group'); dg.appendChild(el('label', '', 'Date'));
+  var dateInput = el('input'); dateInput.type = 'date'; dateInput.value = new Date().toISOString().slice(0,10); dg.appendChild(dateInput);
+  row1.appendChild(tg); row1.appendChild(dg);
+  bd.appendChild(row1);
+
+  // Hours + Mins
+  var row2 = el('div', 'form-row');
+  var hg = el('div', 'form-group'); hg.appendChild(el('label', '', 'Time \u2014 Hours'));
+  var hrsI = el('input'); hrsI.type = 'number'; hrsI.min = '0'; hrsI.placeholder = '0'; hg.appendChild(hrsI);
+  var mg = el('div', 'form-group'); mg.appendChild(el('label', '', 'Minutes'));
+  var minI = el('input'); minI.type = 'number'; minI.min = '0'; minI.max = '59'; minI.placeholder = '0'; mg.appendChild(minI);
+  row2.appendChild(hg); row2.appendChild(mg);
+  bd.appendChild(row2);
+
+  // Paper
+  var pg = el('div', 'form-group'); pg.appendChild(el('label', '', 'Paper Surface'));
+  var paperSel = el('select');
+  paperSel.innerHTML = '<option value="">SELECT SURFACE\u2026</option>' + PAPERS.map(function(p) { return '<option>' + p + '</option>'; }).join('');
+  pg.appendChild(paperSel); bd.appendChild(pg);
+
+  // Grades
+  var gg = el('div', 'form-group'); gg.appendChild(el('label', '', 'Pencil Grades'));
+  var gradesPills = makePillGroup(GRADES, [], true);
+  gg.appendChild(gradesPills.wrap); bd.appendChild(gg);
+
+  // Mood
+  var mog = el('div', 'form-group'); mog.appendChild(el('label', '', 'Mood Signal'));
+  var moodPills = makePillGroup(MOODS, [], false);
+  mog.appendChild(moodPills.wrap); bd.appendChild(mog);
+
+  // Rating
+  var rg = el('div', 'form-group'); rg.appendChild(el('label', '', 'Mission Rating'));
+  var ratingStars = makeStars(0, false, false, function(v) { ratingVal = v; });
+  rg.appendChild(ratingStars); bd.appendChild(rg);
+
+  // Notes
+  var ng = el('div', 'form-group'); ng.appendChild(el('label', '', 'Field Notes'));
+  var notesTA = el('textarea'); notesTA.placeholder = 'Observations, techniques tried, what worked\u2026';
+  ng.appendChild(notesTA); bd.appendChild(ng);
+
+  // Actions
+  var actions = el('div', 'modal-actions');
+  var abort   = el('button', 'btn btn-ghost', 'ABORT'); abort.onclick = closeModal;
+  var commit  = el('button', 'btn btn-primary', 'COMMIT ENTRY');
+  commit.onclick = function() {
+    if (!titleInput.value.trim()) { alert('Title required.'); return; }
+    state.artworks.unshift({
+      id:     uid(),
+      title:  titleInput.value.trim(),
+      date:   dateInput.value,
+      image:  imageData,
+      grades: gradesPills.get(),
+      paper:  paperSel.value,
+      mood:   moodPills.get(),
+      rating: ratingVal,
+      notes:  notesTA.value.trim(),
+      ts:     (parseFloat(hrsI.value) || 0) * 60 + (parseFloat(minI.value) || 0)
+    });
+    save(); closeModal(); renderGallery();
+  };
+  actions.appendChild(abort); actions.appendChild(commit);
+  bd.appendChild(actions);
+
+  wrap.appendChild(hd); wrap.appendChild(bd);
+  openModal(wrap);
+}
+
+function openViewArtworkModal(art) {
+  var wrap = el('div');
+
+  var hd = el('div', 'modal-hd');
+  var ht = el('span');
+  ht.style.cssText = 'font-family:var(--f-display);font-size:15px;font-weight:700;color:var(--text-hi);letter-spacing:0.08em';
+  ht.textContent = art.title;
+  hd.appendChild(ht);
+  var closeBtn = el('button', 'btn btn-ghost btn-sm', '\u2715 CLOSE'); closeBtn.onclick = closeModal;
+  hd.appendChild(closeBtn);
+
+  var bd = el('div', 'modal-bd');
+
+  if (art.image) {
+    var img = el('img');
+    img.src = art.image; img.alt = art.title;
+    img.style.cssText = 'width:100%;max-height:340px;object-fit:contain;background:var(--panel);display:block;';
+    bd.appendChild(img);
+  }
+
+  var detRow = el('div', 'detail-row');
+  function addDetail(lbl, val) {
+    var d = el('div', 'detail-item');
+    var l = el('span', '', lbl); var v = el('span', '', val);
+    d.appendChild(l); d.appendChild(v); detRow.appendChild(d);
+  }
+  addDetail('DATE', art.date);
+  if (art.ts > 0) addDetail('TIME', Math.floor(art.ts/60) + 'H ' + (art.ts%60) + 'M');
+  if (art.paper)  addDetail('SURFACE', art.paper);
+  var ratingD = el('div', 'detail-item');
+  ratingD.appendChild(el('span', '', 'RATING'));
+  ratingD.appendChild(makeStars(art.rating, true, true, null));
+  detRow.appendChild(ratingD);
+  bd.appendChild(detRow);
+
+  if (art.mood) bd.appendChild(el('div', 'mood-strip', art.mood));
+
+  if (art.grades && art.grades.length) {
+    var gpg = el('div', 'form-group');
+    gpg.appendChild(el('label', '', 'Pencil Grades'));
+    var gpills = el('div', 'pills');
+    art.grades.forEach(function(g) { gpills.appendChild(el('span', 'pill on', g)); });
+    gpg.appendChild(gpills); bd.appendChild(gpg);
+  }
+
+  if (art.notes) {
+    var np = el('p');
+    np.style.cssText = 'font-size:14px;line-height:1.7;color:var(--text);font-style:italic;';
+    np.textContent = art.notes; bd.appendChild(np);
+  }
+
+  var actions = el('div', 'modal-actions');
+  var delBtn  = el('button', 'btn btn-danger btn-sm', 'DELETE ENTRY');
+  delBtn.onclick = function() {
+    state.artworks = state.artworks.filter(function(a) { return a.id !== art.id; });
+    save(); closeModal(); renderGallery();
+  };
+  actions.appendChild(delBtn); bd.appendChild(actions);
+
+  wrap.appendChild(hd); wrap.appendChild(bd);
+  openModal(wrap, '640px');
+}
+
+/* ════════════════════════════════════════════════════════════════
+   SESSIONS TAB
+════════════════════════════════════════════════════════════════ */
+function renderSessions() {
+  var panel = document.getElementById('tab-sessions');
+  panel.innerHTML = '';
+
+  var totalMins = state.sessions.reduce(function(a,s) { return a + (s.ts||0); }, 0);
+
+  var hdr  = el('div', 'hdr');
+  var hdrL = el('div');
+  hdrL.appendChild(el('div', 'sec-head', 'MISSION LOG'));
+  hdrL.appendChild(el('div', 'sec-sub', state.sessions.length + ' SESSIONS \u2014 ' + (totalMins/60).toFixed(1) + ' HRS LOGGED'));
+  var addBtn = el('button', 'btn btn-primary', '+ LOG SESSION');
+  addBtn.onclick = openAddSessionModal;
+  hdr.appendChild(hdrL); hdr.appendChild(addBtn);
+  panel.appendChild(hdr);
+
+  if (!state.sessions.length) {
+    var empty = el('div', 'empty');
+    empty.appendChild(el('div', 'empty-icon', '\u23F1'));
+    empty.appendChild(el('p', '', 'NO SESSIONS RECORDED \u2014 BEGIN TRACKING'));
+    panel.appendChild(empty);
+    return;
+  }
+
+  var list   = el('div', 'fade-up');
+  var sorted = state.sessions.slice().sort(function(a,b) { return new Date(b.date) - new Date(a.date); });
+
+  sorted.forEach(function(s) {
+    var row  = el('div', 'sess-row');
+    var top  = el('div', 'sess-top');
+    var left = el('div'); left.style.flex = '1';
+
+    var meta = el('div', 'sess-meta');
+    meta.appendChild(el('span', 'sess-date', s.date));
+    if (s.ts > 0) meta.appendChild(el('span', 'sess-time', '\u23F1 ' + Math.floor(s.ts/60) + 'H ' + (s.ts%60) + 'M'));
+    if (s.mood)   meta.appendChild(el('span', 'sess-mood', s.mood));
+    left.appendChild(meta);
+
+    if (s.focus && s.focus.length) {
+      var pills = el('div', 'pills');
+      s.focus.forEach(function(f) {
+        var p = el('span', 'pill on'); p.style.fontSize = '10px'; p.textContent = f;
+        pills.appendChild(p);
+      });
+      left.appendChild(pills);
+    }
+    if (s.notes) { var np = el('p', 'sess-notes', s.notes); left.appendChild(np); }
+
+    var delBtn = el('button', 'btn btn-ghost btn-sm btn-icon', '\u2715');
+    (function(sid) {
+      delBtn.onclick = function() {
+        state.sessions = state.sessions.filter(function(x) { return x.id !== sid; });
+        save(); renderSessions();
+      };
+    })(s.id);
+
+    top.appendChild(left); top.appendChild(delBtn);
+    row.appendChild(top); list.appendChild(row);
+  });
+
+  panel.appendChild(list);
+}
+
+function openAddSessionModal() {
+  var wrap = el('div');
+
+  var hd = el('div', 'modal-hd');
+  hd.appendChild(el('span', 'modal-hd-title', '[ LOG PRACTICE SESSION ]'));
+  var closeBtn = el('button', 'btn btn-ghost btn-sm', '\u2715 CLOSE'); closeBtn.onclick = closeModal;
+  hd.appendChild(closeBtn);
+
+  var bd = el('div', 'modal-bd');
+
+  // Date row
+  var row1 = el('div', 'form-row');
+  var dg = el('div', 'form-group'); dg.appendChild(el('label', '', 'Date'));
+  var dateInput = el('input'); dateInput.type = 'date'; dateInput.value = new Date().toISOString().slice(0,10);
+  dg.appendChild(dateInput);
+  var tr = el('div', 'form-row');
+  var hg = el('div', 'form-group'); hg.appendChild(el('label', '', 'Hours'));
+  var hrsI = el('input'); hrsI.type = 'number'; hrsI.min = '0'; hrsI.placeholder = '0'; hg.appendChild(hrsI);
+  var mg = el('div', 'form-group'); mg.appendChild(el('label', '', 'Mins'));
+  var minI = el('input'); minI.type = 'number'; minI.min = '0'; minI.max = '59'; minI.placeholder = '0'; mg.appendChild(minI);
+  tr.appendChild(hg); tr.appendChild(mg);
+  row1.appendChild(dg); row1.appendChild(tr);
+  bd.appendChild(row1);
+
+  // Focus
+  var fg = el('div', 'form-group'); fg.appendChild(el('label', '', 'Focus Areas *'));
+  var focusPills = makePillGroup(FOCUS, [], true);
+  fg.appendChild(focusPills.wrap); bd.appendChild(fg);
+
+  // Mood
+  var mog = el('div', 'form-group'); mog.appendChild(el('label', '', 'Mood Signal'));
+  var moodPills = makePillGroup(MOODS, [], false);
+  mog.appendChild(moodPills.wrap); bd.appendChild(mog);
+
+  // Notes
+  var ng = el('div', 'form-group'); ng.appendChild(el('label', '', 'Field Notes'));
+  var notesTA = el('textarea'); notesTA.placeholder = 'What did you practise? Breakthroughs?';
+  ng.appendChild(notesTA); bd.appendChild(ng);
+
+  var actions = el('div', 'modal-actions');
+  var abort   = el('button', 'btn btn-ghost', 'ABORT'); abort.onclick = closeModal;
+  var commit  = el('button', 'btn btn-primary', 'COMMIT SESSION');
+  commit.onclick = function() {
+    var focus = focusPills.get();
+    if (!focus.length) { alert('Select at least one focus area.'); return; }
+    state.sessions.unshift({
+      id:    uid(),
+      date:  dateInput.value,
+      focus: focus,
+      mood:  moodPills.get(),
+      notes: notesTA.value.trim(),
+      ts:    (parseFloat(hrsI.value)||0)*60 + (parseFloat(minI.value)||0)
+    });
+    save(); closeModal(); renderSessions();
+  };
+  actions.appendChild(abort); actions.appendChild(commit);
+  bd.appendChild(actions);
+
+  wrap.appendChild(hd); wrap.appendChild(bd);
+  openModal(wrap);
+}
+
+/* ════════════════════════════════════════════════════════════════
+   PROGRESS TAB — custom SVG charts, zero libraries
+════════════════════════════════════════════════════════════════ */
+function renderProgress() {
+  var panel = document.getElementById('tab-progress');
+  panel.innerHTML = '';
+  panel.appendChild(el('div', 'sec-head', 'TACTICAL OVERVIEW'));
+
+  // Stats
+  var totalMins = state.artworks.concat(state.sessions).reduce(function(a,x) { return a+(x.ts||0); }, 0);
+  var rated     = state.artworks.filter(function(a) { return a.rating > 0; });
+  var avgRating = rated.length ? (rated.reduce(function(a,b) { return a+b.rating; }, 0) / rated.length).toFixed(1) : '\u2014';
+  var statGrid  = el('div', 'stat-grid');
+  [['PIECES', state.artworks.length], ['SESSIONS', state.sessions.length],
+   ['HOURS', (totalMins/60).toFixed(1)], ['AVG \u2605', avgRating]].forEach(function(pair) {
+    var b = el('div', 'stat-block');
+    b.appendChild(el('span', 'stat-num', pair[1]));
+    b.appendChild(el('span', 'stat-label', pair[0]));
+    statGrid.appendChild(b);
+  });
+  panel.appendChild(statGrid);
+
+  // Rating line
+  var ratingData = state.artworks.filter(function(a) { return a.rating > 0; })
+    .slice().sort(function(a,b) { return new Date(a.date)-new Date(b.date); })
+    .map(function(a) { return {x: a.date.slice(5), y: a.rating}; });
+  if (ratingData.length >= 2) {
+    var cp1 = el('div', 'chart-panel');
+    cp1.appendChild(el('div', 'chart-label', '// RATING TRAJECTORY'));
+    cp1.appendChild(svgLineChart(ratingData, [0, 5]));
+    panel.appendChild(cp1);
+  }
+
+  // Hours bar
+  var monthMap = {};
+  state.sessions.concat(state.artworks).forEach(function(x) {
+    if (!x.ts || !x.date) return;
+    var k = x.date.slice(0,7);
+    monthMap[k] = (monthMap[k]||0) + x.ts;
+  });
+  var hoursData = Object.keys(monthMap).sort().slice(-12).map(function(k) {
+    return {x: k.slice(5), y: Math.round(monthMap[k]/60*10)/10};
+  });
+  if (hoursData.length > 0) {
+    var cp2 = el('div', 'chart-panel');
+    cp2.appendChild(el('div', 'chart-label', '// HOURS BY MONTH'));
+    cp2.appendChild(svgBarChart(hoursData));
+    panel.appendChild(cp2);
+  }
+
+  // Focus + Mood side-by-side
+  var focusMap = {}, moodMap = {};
+  state.sessions.forEach(function(s) {
+    (s.focus||[]).forEach(function(f) { focusMap[f] = (focusMap[f]||0)+1; });
+  });
+  state.sessions.concat(state.artworks).forEach(function(x) {
+    if (x.mood) moodMap[x.mood] = (moodMap[x.mood]||0)+1;
+  });
+  var focusArr = Object.keys(focusMap).map(function(k) { return [k, focusMap[k]]; })
+    .sort(function(a,b) { return b[1]-a[1]; }).slice(0,8);
+  var moodArr = Object.keys(moodMap).map(function(k) { return [k, moodMap[k]]; })
+    .sort(function(a,b) { return b[1]-a[1]; });
+
+  var chartRow = el('div', 'chart-row');
+
+  if (focusArr.length) {
+    var fp = el('div', 'chart-panel'); fp.style.marginBottom = '0';
+    fp.appendChild(el('div', 'chart-label', '// FOCUS DISTRIBUTION'));
+    var maxF = focusArr[0][1];
+    focusArr.forEach(function(pair) {
+      var r = el('div', 'focus-bar-row');
+      var top = el('div', 'focus-bar-top');
+      top.appendChild(el('span', '', pair[0]));
+      var cnt = el('span', ''); cnt.style.color = 'var(--cyan)'; cnt.textContent = pair[1];
+      top.appendChild(cnt);
+      var track = el('div', 'prog-track');
+      var fill  = el('div', 'prog-fill');
+      fill.style.width = Math.round(pair[1]/maxF*100) + '%';
+      track.appendChild(fill); r.appendChild(top); r.appendChild(track);
+      fp.appendChild(r);
+    });
+    chartRow.appendChild(fp);
+  }
+
+  if (moodArr.length) {
+    var mp = el('div', 'chart-panel'); mp.style.marginBottom = '0';
+    mp.appendChild(el('div', 'chart-label', '// MOOD LOG'));
+    moodArr.forEach(function(pair) {
+      var r = el('div', 'mood-row');
+      r.appendChild(el('span', '', pair[0]));
+      r.appendChild(el('span', 'mood-count', '\u00D7' + pair[1]));
+      mp.appendChild(r);
+    });
+    chartRow.appendChild(mp);
+  }
+
+  if (chartRow.children.length) panel.appendChild(chartRow);
+
+  if (!state.artworks.length && !state.sessions.length) {
+    var empty = el('div', 'empty');
+    empty.appendChild(el('div', 'empty-icon', '\uD83D\uDCCA'));
+    empty.appendChild(el('p', '', 'NO DATA \u2014 LOG ARTWORK AND SESSIONS TO POPULATE CHARTS'));
+    panel.appendChild(empty);
+  }
+}
+
+/* SVG helpers — math-only, no library ──────────────────────── */
+var NS = 'http://www.w3.org/2000/svg';
+function svgEl(tag, attrs) {
+  var e = document.createElementNS(NS, tag);
+  Object.keys(attrs).forEach(function(k) { e.setAttribute(k, attrs[k]); });
+  return e;
+}
+
+function svgLineChart(data, domain) {
+  var W=500, H=160, PL=30, PB=26, PR=14, PT=10;
+  var pW = W-PL-PR, pH = H-PT-PB;
+  var yMin = domain[0], yMax = domain[1];
+  function toX(i) { return PL + (i/(data.length-1))*pW; }
+  function toY(v) { return PT + (1-(v-yMin)/(yMax-yMin))*pH; }
+
+  var svg = svgEl('svg', {viewBox:'0 0 '+W+' '+H, 'class':'chart'});
+
+  var defs = document.createElementNS(NS, 'defs');
+  defs.innerHTML = '<linearGradient id="lg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#00D4FF" stop-opacity="0.22"/><stop offset="100%" stop-color="#00D4FF" stop-opacity="0"/></linearGradient><filter id="cg"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>';
+  svg.appendChild(defs);
+
+  // Grid
+  [0,1,2,3,4,5].forEach(function(v) {
+    svg.appendChild(svgEl('line', {x1:PL, y1:toY(v), x2:W-PR, y2:toY(v), stroke:'rgba(0,212,255,0.06)', 'stroke-width':'1'}));
+  });
+
+  // Area fill
+  var pathD = data.map(function(d,i) { return (i===0?'M':'L')+toX(i).toFixed(1)+','+toY(d.y).toFixed(1); }).join(' ');
+  var fillD = pathD + ' L'+toX(data.length-1).toFixed(1)+','+(H-PB)+' L'+PL+','+(H-PB)+' Z';
+  svg.appendChild(svgEl('path', {d:fillD, fill:'url(#lg)'}));
+  svg.appendChild(svgEl('path', {d:pathD, fill:'none', stroke:'var(--cyan)', 'stroke-width':'2', filter:'url(#cg)'}));
+
+  // Dots + labels
+  var step = Math.max(1, Math.ceil(data.length/6));
+  data.forEach(function(d, i) {
+    svg.appendChild(svgEl('circle', {cx:toX(i), cy:toY(d.y), r:'5', fill:'var(--hull)', stroke:'var(--cyan)', 'stroke-width':'1.5'}));
+    svg.appendChild(svgEl('circle', {cx:toX(i), cy:toY(d.y), r:'2.5', fill:'var(--cyan)', filter:'url(#cg)'}));
+    if (i % step === 0) {
+      var t = svgEl('text', {x:toX(i), y:H-6, 'text-anchor':'middle', fill:'var(--text-dim)', 'font-size':'9', 'font-family':"'Share Tech Mono',monospace"});
+      t.textContent = d.x; svg.appendChild(t);
+    }
+  });
+
+  return svg;
+}
+
+function svgBarChart(data) {
+  var W=500, H=150, PL=30, PB=26, PR=10, PT=10;
+  var pW = W-PL-PR, pH = H-PT-PB;
+  var maxY = Math.max.apply(null, data.map(function(d) { return d.y; }));
+  if (maxY === 0) maxY = 1;
+  var gap = pW/data.length, bW = gap*0.55;
+
+  var svg = svgEl('svg', {viewBox:'0 0 '+W+' '+H, 'class':'chart'});
+  var defs = document.createElementNS(NS, 'defs');
+  defs.innerHTML = '<filter id="bg"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>';
+  svg.appendChild(defs);
+
+  [0,.25,.5,.75,1].forEach(function(f) {
+    var y = PT + (1-f)*pH;
+    svg.appendChild(svgEl('line', {x1:PL, y1:y, x2:W-PR, y2:y, stroke:'rgba(0,212,255,0.06)', 'stroke-width':'1'}));
+  });
+
+  data.forEach(function(d, i) {
+    var bH = (d.y/maxY)*pH;
+    var bX = PL + i*gap + (gap-bW)/2;
+    var bY = PT + pH - bH;
+    svg.appendChild(svgEl('rect', {x:bX, y:bY, width:bW, height:bH, fill:'rgba(0,212,255,0.1)', rx:'1'}));
+    svg.appendChild(svgEl('rect', {x:bX, y:bY, width:bW, height:Math.min(bH,3), fill:'var(--cyan)', rx:'1', filter:'url(#bg)'}));
+    svg.appendChild(svgEl('rect', {x:bX, y:bY, width:bW, height:bH, fill:'none', stroke:'rgba(0,212,255,0.35)', 'stroke-width':'1', rx:'1'}));
+    var t = svgEl('text', {x:bX+bW/2, y:H-7, 'text-anchor':'middle', fill:'var(--text-dim)', 'font-size':'9', 'font-family':"'Share Tech Mono',monospace"});
+    t.textContent = d.x; svg.appendChild(t);
+  });
+
+  return svg;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   SUPPLIES TAB
+════════════════════════════════════════════════════════════════ */
+function renderSupplies() {
+  var panel = document.getElementById('tab-supplies');
+  panel.innerHTML = '';
+  panel.appendChild(el('div', 'sec-head', 'INVENTORY'));
+  renderPencilSection(panel);
+  renderPaperSection(panel);
+}
+
+function renderPencilSection(panel) {
+  var section = el('div'); section.style.marginBottom = '36px';
+
+  var hdr = el('div', 'hdr'); hdr.style.marginBottom = '14px';
+  var lbl = el('span'); lbl.style.cssText = 'font-family:var(--f-mono);font-size:11px;color:var(--text);letter-spacing:0.1em;text-transform:uppercase';
+  lbl.textContent = '// PENCILS & GRAPHITE';
+  var addBtn = el('button', 'btn btn-ghost btn-sm', '+ ADD');
+  addBtn.onclick = function() { toggleInlineForm(section, 'pencil'); };
+  hdr.appendChild(lbl); hdr.appendChild(addBtn);
+  section.appendChild(hdr);
+
+  var pencils = state.supplies.pencils || [];
+  if (pencils.length) {
+    var grid = el('div', 'sup-grid');
+    pencils.forEach(function(p) {
+      var card = el('div', 'sup-card');
+      var pip  = p.status === 'Active' ? 'pip-green' : (p.status === 'Low' ? 'pip-amber' : 'pip-red');
+      var inner = el('div'); inner.style.cssText = 'display:flex;justify-content:space-between;align-items:flex-start';
+      var left  = el('div');
+      left.appendChild(el('div', 'sup-grade', p.grade));
+      if (p.brand) left.appendChild(el('div', 'sup-brand', p.brand));
+      if (p.notes) left.appendChild(el('div', 'sup-note', p.notes));
+      var right = el('div'); right.style.cssText = 'display:flex;flex-direction:column;align-items:flex-end;gap:8px';
+      var status = el('span', 'sup-status');
+      status.innerHTML = '<span class="pip '+pip+'"></span><span style="color:var(--text-dim)">' + p.status.toUpperCase() + '</span>';
+      var del = el('button', 'btn btn-ghost btn-sm', '\u2715'); del.style.cssText = 'padding:4px 10px;font-size:13px';
+      (function(pid) { del.onclick = function() { state.supplies.pencils = state.supplies.pencils.filter(function(x) { return x.id !== pid; }); save(); renderSupplies(); }; })(p.id);
+      right.appendChild(status); right.appendChild(del);
+      inner.appendChild(left); inner.appendChild(right);
+      card.appendChild(inner);
+      grid.appendChild(card);
+    });
+    section.appendChild(grid);
+  } else {
+    var empty = el('div', 'empty'); empty.style.padding = '24px';
+    empty.appendChild(el('p', '', 'NO PENCILS LOGGED'));
+    section.appendChild(empty);
+  }
+  panel.appendChild(section);
+}
+
+function renderPaperSection(panel) {
+  var section = el('div');
+
+  var hdr = el('div', 'hdr'); hdr.style.marginBottom = '14px';
+  var lbl = el('span'); lbl.style.cssText = 'font-family:var(--f-mono);font-size:11px;color:var(--text);letter-spacing:0.1em;text-transform:uppercase';
+  lbl.textContent = '// PAPER & SURFACES';
+  var addBtn = el('button', 'btn btn-ghost btn-sm', '+ ADD');
+  addBtn.onclick = function() { toggleInlineForm(section, 'paper'); };
+  hdr.appendChild(lbl); hdr.appendChild(addBtn);
+  section.appendChild(hdr);
+
+  var papers = state.supplies.papers || [];
+  if (papers.length) {
+    var grid = el('div', 'sup-grid');
+    papers.forEach(function(p) {
+      var card  = el('div', 'sup-card');
+      var inner = el('div'); inner.style.cssText = 'display:flex;justify-content:space-between';
+      var left  = el('div');
+      left.appendChild(el('div', 'sup-name', p.type));
+      if (p.brand) left.appendChild(el('div', 'sup-brand', p.brand));
+      if (p.gsm)   left.appendChild(el('div', 'sup-gsm', p.gsm + ' GSM'));
+      if (p.notes) left.appendChild(el('div', 'sup-note', p.notes));
+      var del = el('button', 'btn btn-ghost btn-sm', '\u2715'); del.style.cssText = 'align-self:flex-start;padding:4px 10px;font-size:13px';
+      (function(pid) { del.onclick = function() { state.supplies.papers = state.supplies.papers.filter(function(x) { return x.id !== pid; }); save(); renderSupplies(); }; })(p.id);
+      inner.appendChild(left); inner.appendChild(del);
+      card.appendChild(inner);
+      grid.appendChild(card);
+    });
+    section.appendChild(grid);
+  } else {
+    var empty = el('div', 'empty'); empty.style.padding = '24px';
+    empty.appendChild(el('p', '', 'NO SURFACES LOGGED'));
+    section.appendChild(empty);
+  }
+  panel.appendChild(section);
+}
+
+function toggleInlineForm(section, type) {
+  var existing = section.querySelector('.add-form');
+  if (existing) { existing.remove(); return; }
+
+  var form = el('div', 'add-form');
+
+  if (type === 'pencil') {
+    var row1 = el('div', 'form-row');
+    var g1 = el('div', 'form-group'); g1.appendChild(el('label', '', 'Grade'));
+    var gradeS = el('select'); gradeS.innerHTML = GRADES.map(function(g) { return '<option>'+g+'</option>'; }).join('');
+    g1.appendChild(gradeS);
+    var g2 = el('div', 'form-group'); g2.appendChild(el('label', '', 'Brand'));
+    var brandI = el('input'); brandI.placeholder = 'Staedtler, Faber-Castell\u2026'; g2.appendChild(brandI);
+    row1.appendChild(g1); row1.appendChild(g2);
+
+    var row2 = el('div', 'form-row');
+    var g3 = el('div', 'form-group'); g3.appendChild(el('label', '', 'Status'));
+    var statusS = el('select'); statusS.innerHTML = ['Active','Low','Empty'].map(function(s) { return '<option>'+s+'</option>'; }).join('');
+    g3.appendChild(statusS);
+    var g4 = el('div', 'form-group'); g4.appendChild(el('label', '', 'Notes'));
+    var noteI = el('input'); noteI.placeholder = 'Optional\u2026'; g4.appendChild(noteI);
+    row2.appendChild(g3); row2.appendChild(g4);
+
+    var actions = el('div', 'add-form-actions');
+    var save_   = el('button', 'btn btn-primary btn-sm', 'SAVE');
+    save_.onclick = function() {
+      if (!state.supplies.pencils) state.supplies.pencils = [];
+      state.supplies.pencils.push({id:uid(), grade:gradeS.value, brand:brandI.value.trim(), status:statusS.value, notes:noteI.value.trim()});
+      save(); renderSupplies();
+    };
+    var cancel = el('button', 'btn btn-ghost btn-sm', 'CANCEL'); cancel.onclick = function() { form.remove(); };
+    actions.appendChild(save_); actions.appendChild(cancel);
+    form.appendChild(row1); form.appendChild(row2); form.appendChild(actions);
+
+  } else {
+    var row1 = el('div', 'form-row');
+    var g1 = el('div', 'form-group'); g1.appendChild(el('label', '', 'Type'));
+    var typeS = el('select'); typeS.innerHTML = PAPERS.map(function(p) { return '<option>'+p+'</option>'; }).join('');
+    g1.appendChild(typeS);
+    var g2 = el('div', 'form-group'); g2.appendChild(el('label', '', 'Brand'));
+    var brandI = el('input'); brandI.placeholder = 'Canson, Strathmore\u2026'; g2.appendChild(brandI);
+    row1.appendChild(g1); row1.appendChild(g2);
+
+    var row2 = el('div', 'form-row');
+    var g3 = el('div', 'form-group'); g3.appendChild(el('label', '', 'GSM / Weight'));
+    var gsmI = el('input'); gsmI.placeholder = '90, 160, 300\u2026'; g3.appendChild(gsmI);
+    var g4 = el('div', 'form-group'); g4.appendChild(el('label', '', 'Notes'));
+    var noteI = el('input'); noteI.placeholder = 'Texture, finish\u2026'; g4.appendChild(noteI);
+    row2.appendChild(g3); row2.appendChild(g4);
+
+    var actions = el('div', 'add-form-actions');
+    var save_ = el('button', 'btn btn-primary btn-sm', 'SAVE');
+    save_.onclick = function() {
+      if (!state.supplies.papers) state.supplies.papers = [];
+      state.supplies.papers.push({id:uid(), type:typeS.value, brand:brandI.value.trim(), gsm:gsmI.value.trim(), notes:noteI.value.trim()});
+      save(); renderSupplies();
+    };
+    var cancel = el('button', 'btn btn-ghost btn-sm', 'CANCEL'); cancel.onclick = function() { form.remove(); };
+    actions.appendChild(save_); actions.appendChild(cancel);
+    form.appendChild(row1); form.appendChild(row2); form.appendChild(actions);
+  }
+
+  section.appendChild(form);
+}
+
+/* ════════════════════════════════════════════════════════════════
+   TAB ROUTING
+════════════════════════════════════════════════════════════════ */
+var RENDERERS = {gallery: renderGallery, sessions: renderSessions, progress: renderProgress, supplies: renderSupplies};
+var currentTab = 'gallery';
+
+document.getElementById('tabs').addEventListener('click', function(e) {
+  var btn = e.target.closest('button[data-tab]');
+  if (!btn) return;
+  var tab = btn.dataset.tab;
+  if (tab === currentTab) return;
+  document.querySelectorAll('#tabs button').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  document.querySelectorAll('.tab-panel').forEach(function(p) { p.style.display = 'none'; });
+  document.getElementById('tab-' + tab).style.display = '';
+  currentTab = tab;
+  RENDERERS[tab]();
+});
+
+/* ── Initial render ─────────────────────────────────────────── */
+updateStatusBar();
+renderGallery();
+
+/* Remove boot overlay from DOM after animation completes */
+setTimeout(function() { var b = document.getElementById('boot'); if (b) b.remove(); }, 1900);
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════
+     PWA Install Prompt Overlay
+     Shows every time the page loads, as long as the app is
+     not already running in standalone (installed) mode.
+     ═══════════════════════════════════════════════════════════ -->
+<div id="install-overlay" style="display:none">
+  <div id="install-modal">
+    <div class="ic tl"></div><div class="ic tr"></div>
+    <div class="ic bl"></div><div class="ic br"></div>
+    <div id="install-icon-wrap">
+      <img src="icon-192.png" alt="GRAPHITE" id="install-icon" onerror="this.style.display='none'"/>
+    </div>
+    <div id="install-title">GRAPHITE</div>
+    <div id="install-sub">// DRAWING COMMAND SYSTEM</div>
+    <div id="install-details">
+      <div class="install-row"><span class="install-dot"></span>Works offline — no connection required</div>
+      <div class="install-row"><span class="install-dot"></span>Fullscreen app — no browser chrome</div>
+      <div class="install-row"><span class="install-dot"></span>All data stored privately on your device</div>
+    </div>
+    <div id="install-actions">
+      <button id="install-btn" class="btn btn-primary">⬇ INSTALL APP</button>
+      <button id="dismiss-btn" class="btn btn-ghost">CONTINUE IN BROWSER</button>
+    </div>
+    <div id="install-note">Tap INSTALL APP to add GRAPHITE to your home screen for the full experience.</div>
+  </div>
+</div>
+
+<style>
+  #install-overlay {
+    position: fixed; inset: 0; z-index: 600;
+    background: rgba(6,9,14,0.96);
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+    backdrop-filter: blur(8px);
+    animation: fadeIn 0.35s ease;
+  }
+  #install-modal {
+    position: relative; background: var(--hull);
+    border: 1px solid var(--border);
+    width: 100%; max-width: 400px;
+    padding: 40px 36px 32px; text-align: center;
+    box-shadow: 0 0 80px rgba(0,212,255,0.15);
+    animation: fadeUp 0.35s ease;
+  }
+  .ic { position:absolute; width:20px; height:20px; border-color:var(--cyan); border-style:solid; }
+  .ic.tl { top:-1px;    left:-1px;  border-width:2px 0 0 2px; }
+  .ic.tr { top:-1px;    right:-1px; border-width:2px 2px 0 0; }
+  .ic.bl { bottom:-1px; left:-1px;  border-width:0 0 2px 2px; }
+  .ic.br { bottom:-1px; right:-1px; border-width:0 2px 2px 0; }
+  #install-icon-wrap { width:80px; height:80px; margin:0 auto 20px; border:1px solid var(--border); display:flex; align-items:center; justify-content:center; background:var(--panel); }
+  #install-icon { width:64px; height:64px; display:block; }
+  #install-title { font-family:var(--f-display); font-size:28px; font-weight:900; color:var(--cyan); letter-spacing:0.18em; text-shadow:0 0 20px rgba(0,212,255,0.5); margin-bottom:4px; }
+  #install-sub { font-family:var(--f-mono); font-size:11px; color:var(--text-dim); letter-spacing:0.12em; margin-bottom:28px; }
+  #install-details { text-align:left; margin-bottom:28px; border:1px solid var(--border); padding:16px 18px; background:var(--panel); display:flex; flex-direction:column; gap:10px; }
+  .install-row { font-family:var(--f-mono); font-size:11px; color:var(--text); letter-spacing:0.04em; display:flex; align-items:center; gap:10px; }
+  .install-dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--cyan); box-shadow:0 0 6px var(--cyan); flex-shrink:0; animation:pulse 2s infinite; }
+  #install-actions { display:flex; flex-direction:column; gap:10px; margin-bottom:16px; }
+  #install-actions .btn { justify-content:center; width:100%; padding:12px; font-size:12px; }
+  #install-note { font-family:var(--f-mono); font-size:10px; color:var(--text-dim); letter-spacing:0.06em; line-height:1.6; }
+</style>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   PWA INSTALL PROMPT LOGIC
+
+   How Chrome's install system works:
+   - Chrome fires 'beforeinstallprompt' when it thinks the page
+     is installable (manifest present, SW registered, HTTPS).
+   - We intercept that event and store it so WE control when the
+     native prompt appears — rather than Chrome's tiny address bar chip.
+   - We show our own full-screen overlay immediately on every load,
+     unless the app is already running in standalone (installed) mode.
+   - When the user taps "INSTALL APP", we trigger the stored native
+     prompt, which shows Chrome's official install dialog on top.
+   ═══════════════════════════════════════════════════════════════ */
+
+(function() {
+  var deferredPrompt = null;   // holds the intercepted browser event
+  var overlay = document.getElementById('install-overlay');
+
+  // If already running as an installed PWA (standalone mode), never show the prompt.
+  // matchMedia checks CSS display-mode; navigator.standalone covers iOS Safari.
+  var isStandalone = window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true;
+
+  if (isStandalone) {
+    // Already installed — skip the entire prompt system
+    return;
+  }
+
+  // Intercept the browser's install prompt event so it doesn't show
+  // Chrome's default chip, and save it so we can fire it on demand.
+  window.addEventListener('beforeinstallprompt', function(e) {
+    e.preventDefault();          // suppress Chrome's automatic prompt
+    deferredPrompt = e;          // save it for our install button
+    overlay.style.display = 'flex'; // show our overlay now
+  });
+
+  // On some browsers / revisits, beforeinstallprompt may already have fired
+  // before our listener was attached, or may not fire on iOS. Show the overlay
+  // after a short delay so the boot animation completes first (1.9s), but only
+  // if not standalone.
+  setTimeout(function() {
+    if (!isStandalone) {
+      overlay.style.display = 'flex';
+    }
+  }, 2000);
+
+  // ── INSTALL button: triggers Chrome's native install dialog ──
+  document.getElementById('install-btn').addEventListener('click', function() {
+    if (deferredPrompt) {
+      // We have the native prompt stored — trigger it.
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then(function(result) {
+        console.log('[GRAPHITE] Install choice:', result.outcome);
+        deferredPrompt = null;
+        overlay.style.display = 'none';
+      });
+    } else {
+      // No native prompt available (iOS Safari, already installed, or not HTTPS yet).
+      // Show instructions instead.
+      document.getElementById('install-note').innerHTML =
+        'On iOS: tap the <strong style="color:var(--cyan)">Share</strong> button in Safari, then <strong style="color:var(--cyan)">Add to Home Screen</strong>.<br>' +
+        'On Android/Chrome: tap the <strong style="color:var(--cyan)">⋮ menu</strong>, then <strong style="color:var(--cyan)">Add to Home Screen</strong>.';
+    }
+  });
+
+  // ── DISMISS button: closes the overlay and lets the user continue ──
+  // The overlay will appear again on the next page load because we
+  // intentionally do NOT set any localStorage flag — giving the
+  // "every single time" behaviour requested.
+  document.getElementById('dismiss-btn').addEventListener('click', function() {
+    overlay.style.display = 'none';
+  });
+
+  // If the app gets installed during the session, hide the overlay.
+  window.addEventListener('appinstalled', function() {
+    overlay.style.display = 'none';
+    console.log('[GRAPHITE] App installed successfully.');
+  });
+})();
+</script>
+
+<!-- Service worker: only on real deployments, not preview sandboxes -->
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    var host = window.location.hostname;
+    var real = host === 'localhost' || host === '127.0.0.1'
+      || host.indexOf('.github.io') !== -1
+      || host.indexOf('.pages.dev') !== -1
+      || host.indexOf('.netlify.app') !== -1;
+    if (real) {
+      navigator.serviceWorker.register('./sw.js')
+        .then(function(r) { console.log('[GRAPHITE] SW registered:', r.scope); })
+        .catch(function(e) { console.warn('[GRAPHITE] SW failed:', e); });
+    }
+  });
+}
+</script>
+</body>
+</html>
